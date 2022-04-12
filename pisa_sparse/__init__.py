@@ -25,7 +25,7 @@ class SparseGenerator:
             for text_obj in texts_iter:
                 batch_texts.append(text_obj)
                 if len(batch_ids) == batch_size:
-                    batch_term_weights = encoder(batch_texts)
+                    batch_term_weights = encoder.encode(batch_texts)
                     for tw in batch_term_weights
                         yield tw
         generator = SparseGenerator(live_gen())
