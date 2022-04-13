@@ -7,6 +7,8 @@ import math
 
 class UniCOILEncoder(PreTrainedModel):
     config_class = BertConfig
+    base_model_prefix = 'coil_encoder'
+    load_tf_weights = None
     def __init__(self, config: BertConfig):
         super().__init__(config)
         self.config = config 
