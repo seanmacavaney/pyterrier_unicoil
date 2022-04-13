@@ -1,18 +1,35 @@
 import torch 
 from torch import nn
-
-from transformers import PreTrainedModel, BertModel, BertTokenizer
+if torch.cuda.is_available():
+    from torch.cuda.amp import autocast
+from transformers import PreTrainedModel, BertModel, BertTokenizer, BertConfig
+import math
 
 class UniCOILEncoder(PreTrainedModel):
-    def __init__(self, config):
+    config_class = BertConfig
+    def __init__(self, config: BertConfig):
         super().__init__(config)
         self.config = config 
         self.bert = BertModel(config)
         self.tok_proj = torch.nn.Linear(config.hidden_size, 1)
 
-    def forward(self, input_ids: torch.Tensor, attention_mask: Optional[torch.Tensor] = None):
-        input_shape = input_ids.size()
-        device = input_ids.device 
+    def _init_weights(self, module):
+            """ Initialize the weights (needed this for the inherited from_pretrained method to work) """
+            if isinstance(module, (torch.nn.Linear, torch.nn.Embedding)):
+                # Slightly different from the TF version which uses truncated_normal for initialization
+                # cf https://github.com/pytorch/pytorch/pull/5617
+                module.weight.data.normal_(mean=0.0, std=self.config.initializer_range)
+            elif isinstance(module, torch.nn.LayerNorm):
+                module.bias.data.zero_()
+                module.weight.data.fill_(1.0)
+            if isinstance(module, torch.nn.Linear) and module.bias is not None:
+                module.bias.data.zero_()
+
+    def init_weights(self):
+        self.bert.init_weights()
+        self.tok_proj.apply(self._init_weights)
+
+    def forward(self, input_ids: torch.Tensor, attention_mask: torch.Tensor = None):
         outputs = self.bert(input_ids = input_ids, attention_mask=attention_mask)
         sequence_output = outputs.last_hidden_state 
         tok_weights = self.tok_proj(sequence_output)
@@ -23,7 +40,7 @@ class UniCOILEncoder(PreTrainedModel):
 class UniCOILDocumentEncoder:
     def __init__(self, model_name, tokenizer_name=None, device='cuda:0'):
         self.device = device
-        self.model = UniCoilEncoder.from_pretrained(model_name)
+        self.model = UniCOILEncoder.from_pretrained(model_name)
         self.model.to(self.device)
         self.tokenizer = BertTokenizer.from_pretrained(tokenizer_name or model_name)
 
@@ -41,7 +58,7 @@ class UniCOILDocumentEncoder:
         batch_token_ids = inps["input_ids"].cpu().detach().numpy()
         return self._output_to_weight_dicts(docnos, batch_token_ids, batch_weights)
 
-    def _output_to_weight_dicts(self, docnodes, batch_token_ids, batch_weights):
+    def _output_to_weight_dicts(self, docnos, batch_token_ids, batch_weights):
         to_return = []
         for idx, token_ids in enumerate(batch_token_ids):
             weights = batch_weights[idx].flatten()
