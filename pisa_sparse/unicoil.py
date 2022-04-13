@@ -31,8 +31,8 @@ class UniCOILEncoder(PreTrainedModel):
         self.bert.init_weights()
         self.tok_proj.apply(self._init_weights)
 
-    def forward(self, input_ids: torch.Tensor, attention_mask: torch.Tensor = None):
-        outputs = self.bert(input_ids = input_ids, attention_mask=attention_mask)
+    def forward(self, **kargs):
+        outputs = self.bert(**kargs)
         sequence_output = outputs.last_hidden_state 
         tok_weights = self.tok_proj(sequence_output)
         tok_weights = torch.relu(tok_weights)
@@ -68,7 +68,7 @@ class UniCOILDocumentEncoder:
             tok_weights = {}
             for tok, weight in zip(tokens, weights):
                 quantized_weight  = math.ceil(weight*100)
-                if tok in ['[CLS]', 'PAD']:
+                if tok in ['[CLS]', '[SEP]']:
                     continue
                 if tok == '[PAD]':
                     break
