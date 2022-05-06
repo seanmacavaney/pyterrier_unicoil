@@ -4,6 +4,8 @@ if torch.cuda.is_available():
     from torch.cuda.amp import autocast
 from transformers import PreTrainedModel, BertModel, BertTokenizer, BertConfig
 import math
+from pyterrier import Transformer
+
 
 class UniCOILEncoder(PreTrainedModel):
     config_class = BertConfig
@@ -39,7 +41,7 @@ class UniCOILEncoder(PreTrainedModel):
         return tok_weights
 
 
-class UniCOILDocumentEncoder:
+class UniCOILDocumentEncoder(Transformer):
     def __init__(self, model_name, tokenizer_name=None, device='cuda:0'):
         self.device = device
         self.model = UniCOILEncoder.from_pretrained(model_name)
@@ -47,8 +49,13 @@ class UniCOILDocumentEncoder:
         self.tokenizer = BertTokenizer.from_pretrained(tokenizer_name or model_name)
 
     def encode(self, batch, fp16=False):
-        texts = [b["text"] for b in batch]
-        docnos = [b["docno"] for b in batch]
+        texts = []
+        docnos = []
+        for b in batch:
+            texts.append(b["text"])
+            docnos.append(b['docno'])
+        # texts = [b["text"] for b in batch]
+        # docnos = [b["docno"] for b in batch]
         max_length = 512  # hardcode for now
         inps = self.tokenizer(texts, max_length=max_length, padding='longest', truncation=True, add_special_tokens=True, return_tensors='pt').to(self.device)
         if fp16:
@@ -56,12 +63,24 @@ class UniCOILDocumentEncoder:
                 with torch.no_grad():
                     batch_weights = self.model(**inps).cpu().detach().numpy()
         else:
-            batch_weights = self.model(**inps).cpu().detach().numpy()
+            with torch.no_grad():
+                batch_weights = self.model(**inps).cpu().detach().numpy()
         batch_token_ids = inps["input_ids"].cpu().detach().numpy()
+        
         return self._output_to_weight_dicts(docnos, batch_token_ids, batch_weights)
+
+    def transform(self, batch_df):
+        from datetime import datetime
+        print("%s Batch of %d docs" % (str(datetime.now()), len(batch_df)))
+        def row_iter():
+            for row in batch_df.itertuples():
+                yield {'docno': row.docno, 'text' : row.text}
+        batch_df["vector"] = [ kv["vector"] for kv in self.encode(row_iter()) ]
+        return batch_df
 
     def _output_to_weight_dicts(self, docnos, batch_token_ids, batch_weights):
         to_return = []
+        assert len(docnos) == len(batch_token_ids)
         for idx, token_ids in enumerate(batch_token_ids):
             weights = batch_weights[idx].flatten()
             tokens = self.tokenizer.convert_ids_to_tokens(token_ids.flatten())
